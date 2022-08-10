@@ -76,18 +76,6 @@ def load_db():
   password = os.environ['WONSEOK']
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
-
-def find_places_in_travel_note(travel_note_id, db):
-  cursor= db.cursor()
-  sql = f"select places from course where travel_note_id={travel_note_id}"
-  cursor.execute(sql)
-  result = cursor.fetchall()
-  for places in result:
-    print(places)
-  places = []
-  for path in result:
-    places += path[0]
-  return places
   
 def calculate_taste(user_id,db):
   print("calculate_tast...")
@@ -124,13 +112,13 @@ def load_place(db):
   df = df.sort_values(by='place_id',ascending=True)
   return df
 
-def recommend_place(user_id,travel_note_id):
+def recommend_place(user_id,places_in_course,num_of_result):
   
   top = 50
   db = load_db()
   place = load_place(db)
   user_taste = calculate_taste(user_id,db)
-  places_in_course = find_places_in_travel_note(travel_note_id, db)
+  
   tag = ['nature','outdoor','fatigue','sea','walking','exciting','day','culture']
   
 
@@ -163,10 +151,10 @@ def recommend_place(user_id,travel_note_id):
 
   #
   result_copy = result.copy() #다시 뽑을 경우를 대비해서 원본 복사본 만들어놓기.
-  result = random.sample(list(result['place_id']), 2) 
+  result = random.sample(list(result['place_id']), num_of_result//2 if num_of_result%2==0 else num_of_result//2+1) 
   # if course에 있는거랑 곂치면 다시 뽑자!!!
   while set(result).intersection(places_in_course) != set():
-    result = random.sample(list(result_copy['place_id']), 2)
+    result = random.sample(list(result_copy['place_id']), num_of_result//2 if num_of_result%2==0 else num_of_result//2+1)
 
   places_in_course += result
 
@@ -208,9 +196,9 @@ def recommend_place(user_id,travel_note_id):
   print("result _ six")
   print(result_six)
   result_six_copy = result_six.copy() #다시 뽑을 경우를 대비해서 원본 복사본 만들어놓기.
-  result_six = random.sample(list(result_six['place_id']), 2) # if 위에서 뽑은거랑 곂치면 다시 뽑자!!!
+  result_six = random.sample(list(result_six['place_id']), num_of_result//2) # if 위에서 뽑은거랑 곂치면 다시 뽑자!!!
   while set(result_six).intersection(places_in_course) != set():
-    result_six = random.sample(list(result_six_copy['place_id']), 2)
+    result_six = random.sample(list(result_six_copy['place_id']), num_of_result//2)
 
   
   final_result = result+result_six
@@ -218,10 +206,15 @@ def recommend_place(user_id,travel_note_id):
   return final_result
 
 
+
+
+
 def lambda_handler(event, context):
   # TODO implement
   id = int(event['queryStringParameters']['memberId'])
-  travel_note_id = int(event['queryStringParameters']['travelNoteId'])
+  places_in_course = event['queryStringParameters']['placesInCourse'].split(',')
+  num_of_result = int(event['queryStringParameters']['numOfResult'])
+
   try:
     db = load_db()
   except:
@@ -233,34 +226,7 @@ def lambda_handler(event, context):
             
         }
         
-  place_list = recommend_place(id,travel_note_id)
-  
-  
-
-  return {
-      'statusCode': 200,
-      'body': json.dumps({  
-                            "placeList" : place_list,
-                            })
-  }
-
-
-def lambda_handler(event, context):
-  # TODO implement
-  id = int(event['queryStringParameters']['memberId'])
-  travel_note_id = int(event['queryStringParameters']['travelNoteId'])
-  try:
-    db = load_db()
-  except:
-    return {
-            'statusCode': 500,
-            "success": False,
-            "message": "Database Error",
-            
-            
-        }
-        
-  place_list = recommend_place(id,travel_note_id)
+  place_list = recommend_place(id,places_in_course,num_of_result)
   
   
 
