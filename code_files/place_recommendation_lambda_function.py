@@ -202,7 +202,7 @@ def recommend_place(user_id,places_in_course,num_of_result):
 
   
   final_result = result+result_six
-
+  final_result = list(map(int,final_result))
   return final_result
 
 

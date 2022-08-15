@@ -50,7 +50,9 @@ def path_divider(day,path):
 
   while start<length:
     print(path[start:start + quotient + check])
-    path_per_day.append(path[start:start + quotient + check])
+    now_day_path = path[start:start + quotient + check]
+    now_day_path = list(map(int,now_day_path))
+    path_per_day.append(now_day_path)
     start += quotient+check
     checker-=1
     if checker<=remainder:

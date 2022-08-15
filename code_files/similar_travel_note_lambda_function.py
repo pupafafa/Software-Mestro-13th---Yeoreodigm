@@ -33,6 +33,7 @@ def find_similart_note(travel_note_id,num_of_result,db):
     num_of_result = count
   
   result = random.sample(result,num_of_result)
+  result = list(map(int,result))
   return result
 
 def lambda_handler(event, context):

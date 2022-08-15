@@ -34,7 +34,7 @@ def optimize_course(place_info,day):
 
   for idx, label in enumerate(kmeans.labels_):
     now = save_id[idx]
-    result[label].append(now)
+    result[label].append(int(now))
   
   return result
   
