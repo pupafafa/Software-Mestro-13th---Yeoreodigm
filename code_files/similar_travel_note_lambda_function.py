@@ -19,7 +19,7 @@ def find_similart_note(travel_note_id,num_of_result,db):
   cursor.execute(length_sql)
   length = cursor.fetchone()[0]
 
-  sql = f"SELECT id FROM course_ where cluster = (SELECT cluster FROM course_ where id = {travel_note_id}) and length>{length-2} and length<{length+2}"
+  sql = f"SELECT id FROM course_ where cluster = (SELECT cluster FROM course_ where id = {travel_note_id}) and length>{length-2} and length<{length+2} and 80 !=ALL(places)"
   cursor.execute(sql)
   result = cursor.fetchall()
   #tuple형태로 되어있는것을 value만 꺼내주기

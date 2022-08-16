@@ -87,6 +87,8 @@ def load_course(day,db,include,location):
 
 
   df = pd.DataFrame()
+  #places가 80번(러브랜드 휴업중)을 포함하는 코스는 제외
+  exclude_love_land_sql = " and 80 != ALL(places)"
   while length >= count:
     possible_cases = list(combinations(include,length-count))
     ##sql query 날리고 결과 받아서
@@ -94,7 +96,7 @@ def load_course(day,db,include,location):
       print("now : ",list(now))
       now_include = list(now)
       load_course_sql= (f"SELECT id,title,nature,outdoor,fatigue,sea,walking,exciting,day,culture,cluster,places, main_location\
- FROM course_ WHERE length>={min_length} and length<={max_length} and array{now_include}::smallint[] <@ places" + location_sql)
+ FROM course_ WHERE length>={min_length} and length<={max_length} and array{now_include}::smallint[] <@ places" + location_sql + exclude_love_land_sql)
       #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
       
       cursor.execute(load_course_sql)
@@ -126,7 +128,7 @@ def load_course(day,db,include,location):
 
 
 def recommend_by_theme(user_id, day, include_list,location,db):
-  top = 5
+  top = 10
   course = load_course(day,db,include_list,location)
   if course.empty:
     print("empty course")
@@ -161,8 +163,9 @@ def recommend_by_theme(user_id, day, include_list,location,db):
   #결과는 가장 일치율이 높은거 1개의 index만 던져주자
   result = top_N_result[0]
   result_df = course.iloc[result]
+   
   print(result_df)
-  
+  #꼭 넣어야할 애들이 아직 안들어 간게 있으면 따로 넣어주기
   not_included_places = list(set(include_list) - set(result_df['places']))
   if 0 not in include_list:
     result_df['places'] += not_included_places

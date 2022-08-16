@@ -37,7 +37,8 @@ def load_course(day,db):
   cursor= db.cursor()
   min = day*3
   max = day*4
-  load_course_sql= (f"SELECT id,title,nature,outdoor,fatigue,sea,walking,exciting,day,culture,cluster,places, main_location FROM course_ where length>={min} and length <={max}")
+  exclude_love_land_sql = " and 80 != ALL(places)"
+  load_course_sql= f"SELECT id,title,nature,outdoor,fatigue,sea,walking,exciting,day,culture,cluster,places, main_location FROM course_ where length>={min} and length <={max}" + exclude_love_land_sql
   #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
       
   cursor.execute(load_course_sql)
