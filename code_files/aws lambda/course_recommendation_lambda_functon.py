@@ -15,24 +15,50 @@ def load_db():
   return db
 
 def calculate_taste(user_id,db):
+  print("calculate_tast...")
   cursor = db.cursor()
+  #1. retrieve from survey
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
   cursor.execute(load_survey_sql)
   result = cursor.fetchone()
   survey_result = result[0]
   print(survey_result)
 
-  theme_score = np.array([0]*8)
+  theme_score = np.array([0]*22)
+  theme_score = theme_score.reshape(1,-1)
   for place in survey_result:
-    load_place_sql = f'SELECT nature,outdoor,fatigue,sea,walking,exciting,day,culture FROM places_analysis WHERE place_id={place}'
+    load_place_sql = f'SELECT theme FROM places_analysis WHERE place_id={place}'
     cursor.execute(load_place_sql)
     place_theme = cursor.fetchone()
     
-    theme_score += np.array(place_theme)
-    print('place : ',place,"\tnow : ",place_theme)
+    theme_score += np.array(place_theme)*10
+  #2. retrieve from place-like log
+  load_like_log_sql = f'SELECT place_id FROM place_like WHERE member_id = {user_id};'
+  cursor.execute(load_like_log_sql)
+  user_like_log = cursor.fetchall()
+  if user_like_log:
+    user_like_log = list(map(lambda x: x[0],user_like_log))
+    for place in user_like_log:
+      load_place_sql = f'SELECT theme FROM places_analysis WHERE place_id={place}'
+      cursor.execute(load_place_sql)
+      place_theme = cursor.fetchone()
+      theme_score += np.array(place_theme)*7
+  
+  #3. retrieve from place_click log
+  load_click_log_sql = f'SELECT place_id FROM places_log WHERE member_id = {user_id};'
+  cursor.execute(load_click_log_sql)
+  user_click_log = cursor.fetchall()
+  if user_click_log:
+    user_click_log = list(map(lambda x: x[0],user_click_log))
+    for place in user_click_log:
+      load_place_sql = f'SELECT theme FROM places_analysis WHERE place_id={place}'
+      cursor.execute(load_place_sql)
+      place_theme = cursor.fetchone()
+      theme_score += np.array(place_theme)
+  print("calculate_tast DONE!!")
+  print("user's taste : ",theme_score.reshape(1,-1))
+  return theme_score.reshape(1,-1)
 
-  result = theme_score / len(survey_result)
-  return result
 
 
 def path_divider(day,path):
@@ -60,14 +86,13 @@ def path_divider(day,path):
 
   return path_per_day
 
-def load_course(day,db,include,location):
+def load_course(day,db,location):
   if day>=25:
     day = 25
     location = []
   cursor= db.cursor()
   min_length = 2*day
   max_length = 4*day
-  length = len(include)
   count = 0
   location_count = len(location)
   if location_count == 4 or location_count == 0:
@@ -85,94 +110,68 @@ def load_course(day,db,include,location):
     elif location_count == 3:
       location_sql = f" and main_location = 'Mixed' and {location[0]} >0 and {location[1]} >0 and {location[2]} >0"
 
-
   df = pd.DataFrame()
+
   #places가 80번(러브랜드 휴업중)을 포함하는 코스는 제외
   exclude_love_land_sql = " and 80 != ALL(places)"
-  while length >= count:
-    possible_cases = list(combinations(include,length-count))
-    ##sql query 날리고 결과 받아서
-    for now in possible_cases:
-      print("now : ",list(now))
-      now_include = list(now)
-      load_course_sql= (f"SELECT id,title,nature,outdoor,fatigue,sea,walking,exciting,day,culture,cluster,places, main_location\
- FROM course_ WHERE length>={min_length} and length<={max_length} and array{now_include}::smallint[] <@ places" + location_sql + exclude_love_land_sql)
-      #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
-      
-      cursor.execute(load_course_sql)
-      result = cursor.fetchall()
 
-      #현재 포함시킬 place를 모두 가지는 코스가 없는경우 
-      if len(result) == 0:
-        continue
-      #현재 Place를 모두 포함하는 코스가 있는경우
-      else:
-        print("현재 now를 포함하는 df : \n",pd.DataFrame(result),"\n****************************\n")
-        df = pd.concat([df, pd.DataFrame(result)])
-    
-    #dataframe에 값이 존재하면 (최적의 코스를 찾았다면)
-    if not df.empty:
-      break    
-    count += 1
+  load_course_sql= (f"SELECT id, theme, score, places FROM course_ WHERE length>={min_length} and length<={max_length}" + location_sql + exclude_love_land_sql)
+  #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
+  
+  cursor.execute(load_course_sql)
+  result = cursor.fetchall()
+
+  df =pd.DataFrame(result)
   
   #해당 조건에 만족하는 코스가 없는 경우
   if df.empty:
     print("no course")
     return df
 
-  df.columns = ['id','title','nature','outdoor','fatigue','sea','walking','exciting','day','culture','cluster','places','main_location']
+  df.columns = ['id','theme','score','places']
 
   return df
   #intersect 밖의 place를 모든 df의 Places list에 append 해줘야함.
 
 
 
+
 def recommend_by_theme(user_id, day, include_list,location,db):
   top = 10
-  course = load_course(day,db,include_list,location)
+  course = load_course(day,db,location)
+  course_size = len(course)
+
   if course.empty:
     print("empty course")
     return None
 
   user_taste = calculate_taste(user_id,db)
-  user_taste = user_taste.reshape(1,-1)
+  course['user_rating'] = course['theme'].apply(lambda x: np.sum(x*user_taste))
+  #취향 점수가 높은 상위 10퍼센트만 선택하기
+  course = course.sort_values('user_rating',ascending = False)
+  high_score_items_id = course.iloc[:course_size//10][['id','score']]
+  print("high_score_items_id 취향 점수 기반 탑텐: ",high_score_items_id)
+  
+  ##여기서 평균 인기도 기준 상위 50퍼센트만 또 뽑아내기.
+  high_score_items_id = high_score_items_id.sort_values(by='score',ascending= False)
+  high_score_items_id = list(high_score_items_id.iloc[:len(high_score_items_id)//2]['id'].values)
+  print("high_score_items_id 인기도 탑 50%: ",high_score_items_id)
+  
+  #여기서 1등을 한 놈 반환해주자
+  result_id = high_score_items_id[0]
+  result_places = course.loc[course['id']==result_id,['places']].values[0][0]
+  print("result_places : ",result_places)
+  
+  #이미 course에 있는 여행지가 뽑힌 경우 다시 뽑기
+  
+  not_included = list(set(include_list) - set(result_places) )
+  result_places += not_included
+  
+  
+  result_places = list(map(int,result_places)) #to use json format,  convert int64 to int
 
-  tag = ['nature','outdoor','fatigue','sea','walking','exciting','day','culture']
-
-  print(user_taste)
-  
-  similarity = cosine_similarity(user_taste, course[tag])
-  similarity = similarity[0]
-  print(similarity.shape)
-      
-  print('similarity : ',similarity)
-  
-  result_index = similarity.argsort()
-  result_index = result_index
-  
-  print("result_index : ",result_index)
-
-  for i in range(-1,-(len(result_index)+1),-1):
-    now_idx = result_index[i]
-    sim = similarity[now_idx]
-    print("similarity : ",sim,"df index : ",now_idx)
-
-  top_N_result = result_index[-1:-(top+1):-1]
-  print("top_N_result",top_N_result)
-  
-  #결과는 가장 일치율이 높은거 1개의 index만 던져주자
-  result = top_N_result[0]
-  result_df = course.iloc[result]
-   
-  print(result_df)
-  #꼭 넣어야할 애들이 아직 안들어 간게 있으면 따로 넣어주기
-  not_included_places = list(set(include_list) - set(result_df['places']))
-  if 0 not in include_list:
-    result_df['places'] += not_included_places
-  
-  path = path_divider(day,result_df['places'])
-  print('path : ',path)
-  return path
+  result = path_divider(day,result_places)
+  return result
     
 def to_lower_case(string):
   return string.lower()
