@@ -3,8 +3,7 @@ import pandas as pd
 import psycopg2
 import numpy as np
 import os
-from sklearn.metrics.pairwise import cosine_similarity
-from itertools import combinations
+import random
 
 def load_db():
   endpoint = os.environ['END_POINT']
@@ -13,6 +12,53 @@ def load_db():
   password = os.environ['WONSEOK']
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
+
+def load_course(day,db,location):
+  if day>=12:
+    day = 11
+    location = []
+  cursor= db.cursor()
+  min_length = 2*day
+  max_length = 4*day
+  count = 0
+  location_count = len(location)
+  if location_count == 4 or location_count == 0:
+    location_sql = ' and 1=1'
+  #case 2 : 한 지역만 선택한 경우 
+  elif location_count == 1:
+    if day>=10:
+      location_sql = ' and 1=1'
+    else:
+      location_sql = f" and LOWER(main_location) = \'{location[0]}\'"
+  #case 3 : 여러 지역을 선택한 경우
+  else:
+    if location_count == 2:
+      location_sql = f" and main_location = 'Mixed' and {location[0]} >0 and {location[1]} >0"
+    elif location_count == 3:
+      location_sql = f" and main_location = 'Mixed' and {location[0]} >0 and {location[1]} >0 and {location[2]} >0"
+
+  df = pd.DataFrame()
+
+  #places가 80번(러브랜드 휴업중)을 포함하는 코스는 제외
+  exclude_love_land_sql = " and 80 != ALL(places)"
+
+  load_course_sql= (f"SELECT id, theme, score, places FROM course_ WHERE length>={min_length} and length<={max_length}" + location_sql + exclude_love_land_sql)
+  #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
+  print("load_course_sql : " ,load_course_sql)
+  cursor.execute(load_course_sql)
+  result = cursor.fetchall()
+
+  df =pd.DataFrame(result)
+  
+  #해당 조건에 만족하는 코스가 없는 경우
+  if df.empty:
+    print("no course")
+    return df
+
+  df.columns = ['id','theme','score','places']
+
+  return df
+  
 
 def calculate_taste(user_id,db):
   print("calculate_tast...")
@@ -86,54 +132,6 @@ def path_divider(day,path):
 
   return path_per_day
 
-def load_course(day,db,location):
-  if day>=25:
-    day = 25
-    location = []
-  cursor= db.cursor()
-  min_length = 2*day
-  max_length = 4*day
-  count = 0
-  location_count = len(location)
-  if location_count == 4 or location_count == 0:
-    location_sql = ' and 1=1'
-  #case 2 : 한 지역만 선택한 경우 
-  elif location_count == 1:
-    if day>=10:
-      location_sql = ' and 1=1'
-    else:
-      location_sql = f" and LOWER(main_location) = \'{location[0]}\'"
-  #case 3 : 여러 지역을 선택한 경우
-  else:
-    if location_count == 2:
-      location_sql = f" and main_location = 'Mixed' and {location[0]} >0 and {location[1]} >0"
-    elif location_count == 3:
-      location_sql = f" and main_location = 'Mixed' and {location[0]} >0 and {location[1]} >0 and {location[2]} >0"
-
-  df = pd.DataFrame()
-
-  #places가 80번(러브랜드 휴업중)을 포함하는 코스는 제외
-  exclude_love_land_sql = " and 80 != ALL(places)"
-
-  load_course_sql= (f"SELECT id, theme, score, places FROM course_ WHERE length>={min_length} and length<={max_length}" + location_sql + exclude_love_land_sql)
-  #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
-  
-  cursor.execute(load_course_sql)
-  result = cursor.fetchall()
-
-  df =pd.DataFrame(result)
-  
-  #해당 조건에 만족하는 코스가 없는 경우
-  if df.empty:
-    print("no course")
-    return df
-
-  df.columns = ['id','theme','score','places']
-
-  return df
-  #intersect 밖의 place를 모든 df의 Places list에 append 해줘야함.
-
-
 
 
 def recommend_by_theme(user_id, day, include_list,location,db):
@@ -148,8 +146,25 @@ def recommend_by_theme(user_id, day, include_list,location,db):
   user_taste = calculate_taste(user_id,db)
   course['user_rating'] = course['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
+  print("course : \n",course)
   course = course.sort_values('user_rating',ascending = False)
-  high_score_items_id = course.iloc[:course_size//10][['id','score']]
+  result_places = []
+  if len(course) == 1:
+    result_places = course['places'].values[0]
+    print("result_places", result_places)
+    result_places = list(map(int,result_places))
+    return (path_divider(day,result_places))
+  elif len(course) < 5:
+    high_score_items_id = course[['id','score']]
+  elif len(course) < 10:
+    high_score_items_id = course.iloc[:course_size//2][['id','score']]
+  elif len(course) < 20:
+    high_score_items_id = course.iloc[:course_size//5][['id','score']]
+  else:
+    high_score_items_id = course.iloc[:course_size//10][['id','score']]
+  
+  
+
   print("high_score_items_id 취향 점수 기반 탑텐: ",high_score_items_id)
   
   ##여기서 평균 인기도 기준 상위 50퍼센트만 또 뽑아내기.
@@ -163,9 +178,10 @@ def recommend_by_theme(user_id, day, include_list,location,db):
   print("result_places : ",result_places)
   
   #이미 course에 있는 여행지가 뽑힌 경우 다시 뽑기
-  
-  not_included = list(set(include_list) - set(result_places) )
-  result_places += not_included
+  print("include_list : ",include_list)
+  if 0 not in include_list:
+    not_included = list(set(include_list) - set(result_places))
+    result_places += not_included
   
   
   result_places = list(map(int,result_places)) #to use json format,  convert int64 to int
