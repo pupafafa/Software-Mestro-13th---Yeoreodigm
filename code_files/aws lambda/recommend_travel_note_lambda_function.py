@@ -13,6 +13,13 @@ def load_db():
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
 
+def retrieve_taste_db(user_id,db):
+  cursor = db.cursor()
+  sql = f"SELECT taste,last_update from user_taste where user_id={user_id}"
+  cursor.execute(sql)
+  result = cursor.fetchone()
+  return result
+  
 def calculate_taste(user_id,db):
   print("calculate_tast...")
   cursor = db.cursor()
@@ -20,7 +27,13 @@ def calculate_taste(user_id,db):
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
   cursor.execute(load_survey_sql)
   result = cursor.fetchone()
-  survey_result = result[0]
+  
+
+  try:
+    survey_result = result[0]
+  except Exception as e:
+    print("해당 유저가 존재하지 않습니다.")
+
   print(survey_result)
 
   theme_score = np.array([0]*22)
@@ -30,7 +43,7 @@ def calculate_taste(user_id,db):
     cursor.execute(load_place_sql)
     place_theme = cursor.fetchone()
     
-    theme_score += np.array(place_theme)*10
+    theme_score += np.array(place_theme)*2
   #2. retrieve from place-like log
   load_like_log_sql = f'SELECT place_id FROM place_like WHERE member_id = {user_id};'
   cursor.execute(load_like_log_sql)
@@ -41,7 +54,7 @@ def calculate_taste(user_id,db):
       load_place_sql = f'SELECT theme FROM places_analysis WHERE place_id={place}'
       cursor.execute(load_place_sql)
       place_theme = cursor.fetchone()
-      theme_score += np.array(place_theme)*7
+      theme_score += np.array(place_theme)*5
   
   #3. retrieve from place_click log
   load_click_log_sql = f'SELECT place_id FROM places_log WHERE member_id = {user_id};'
@@ -58,6 +71,30 @@ def calculate_taste(user_id,db):
   print("user's taste : ",theme_score.reshape(1,-1))
   return theme_score.reshape(1,-1)
 
+def retrieve_taste(user_id,db):
+  info = retrieve_taste_db(user_id,db)
+  cursor =db.cursor()
+  if info != None: 
+    if (datetime.date.today() - info[1].date()).days>=3:
+      print("update calcuate")
+      updated_taste = calculate_taste(user_id,db)
+      db_updated_taste = list(map(int, updated_taste[0]))
+      #update db
+      sql = f"update user_taste set taste = ARRAY{db_updated_taste} where user_id = {user_id}"
+      cursor.execute(sql)
+      db.commit()
+    else:
+      print("db에서 그대로 가져와서 빨라용!!")
+      return np.array(info[0]).reshape(1,-1)
+  else:
+    print("calculate new")
+    updated_taste = calculate_taste(user_id,db)
+    db_updated_taste = list(map(int, updated_taste[0]))
+    #insert new row to db
+    cursor.execute("INSERT INTO user_taste(user_id,taste) VALUES(%s, %s)",(user_id,db_updated_taste))
+    db.commit()
+    
+  return updated_taste
 
 def load_course(day,db,location):
   if day>=25:
@@ -117,7 +154,7 @@ def recommend_travel_note(user_id, num_of_result,db):
     print("empty course")
     return None
 
-  user_taste = calculate_taste(user_id,db)
+  user_taste = retrieve_taste(user_id,db)
   course['user_rating'] = course['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
   course = course.sort_values('user_rating',ascending = False)

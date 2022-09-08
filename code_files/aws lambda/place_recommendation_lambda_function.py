@@ -1,64 +1,3 @@
-import json
-import pandas as pd
-import psycopg2
-import numpy as np
-import random
-import os
-
-def load_db():
-  endpoint = os.environ['END_POINT']
-  dbname = os.environ['DB_NAME']
-  user = os.environ['USER_NAME']
-  password = os.environ['WONSEOK']
-  db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
-  return db
-
-def find_places_in_travel_note(travel_note_id, db):
-  cursor= db.cursor()
-  sql = f"select places from course where travel_note_id={travel_note_id}"
-  cursor.execute(sql)
-  result = cursor.fetchall()
-  for places in result:
-    print(places)
-  places = []
-  for path in result:
-    places += path[0]
-  return places
-  
-def calculate_taste(user_id,db):
-  print("calculate_tast...")
-  cursor = db.cursor()
-  load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
-  cursor.execute(load_survey_sql)
-  result = cursor.fetchone()
-  survey_result = result[0]
-  print(survey_result)
-
-  theme_score = np.array([0]*8)
-  for place in survey_result:
-    load_place_sql = f'SELECT nature,outdoor,fatigue,sea,walking,exciting,day,culture FROM places_analysis WHERE place_id={place}'
-    cursor.execute(load_place_sql)
-    place_theme = cursor.fetchone()
-    
-    theme_score += np.array(place_theme)
-    #print('place : ',place,"\tnow : ",place_theme)
-
-  avg_theme_score = theme_score / len(survey_result)
-  user_taste = pd.DataFrame(avg_theme_score.reshape(1,-1))
-  user_taste.columns = ['nature','outdoor','fatigue','sea','walking','exciting','day','culture']
-  print("calculate_tast DONE!!")
-  return user_taste
-
-def load_place(db):
-  cursor= db.cursor()
-  
-  load_place_sql= f'SELECT place_id,nature,outdoor,fatigue,sea,walking,exciting,day,culture,cluster FROM places_analysis'
-  cursor.execute(load_place_sql)
-  result = cursor.fetchall()
-  df = pd.DataFrame(result)
-  df.columns = ['place_id','nature','outdoor','fatigue','sea','walking','exciting','day','culture','cluster']
-  df = df.sort_values(by='place_id',ascending=True)
-  return df
 
 import json
 import pandas as pd
@@ -67,6 +6,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import random
 import os
+import datetime
 
 def load_db():
   endpoint = os.environ['END_POINT']
@@ -75,6 +15,14 @@ def load_db():
   password = os.environ['WONSEOK']
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
+
+#db에서 가져오는 함수
+def retrieve_taste_db(user_id,db):
+  cursor = db.cursor()
+  sql = f"SELECT taste,last_update from user_taste where user_id={user_id}"
+  cursor.execute(sql)
+  result = cursor.fetchone()
+  return result
   
 def calculate_taste(user_id,db):
   print("calculate_tast...")
@@ -83,7 +31,13 @@ def calculate_taste(user_id,db):
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
   cursor.execute(load_survey_sql)
   result = cursor.fetchone()
-  survey_result = result[0]
+  
+
+  try:
+    survey_result = result[0]
+  except Exception as e:
+    print("해당 유저가 존재하지 않습니다.")
+
   print(survey_result)
 
   theme_score = np.array([0]*22)
@@ -130,10 +84,36 @@ def load_place(db):
   attraction.columns = ['id','theme']
   return attraction
 
+def retrieve_taste(user_id,db):
+  info = retrieve_taste_db(user_id,db)
+  cursor =db.cursor()
+  if info != None: 
+    if (datetime.date.today() - info[1].date()).days>=3:
+      print("update calcuate")
+      updated_taste = calculate_taste(user_id,db)
+      db_updated_taste = list(map(int, updated_taste[0]))
+      #update db
+      sql = f"update user_taste set taste = ARRAY{db_updated_taste} where user_id = {user_id}"
+      cursor.execute(sql)
+      db.commit()
+    else:
+      print("db에서 그대로 가져와서 빨라용!!")
+      return np.array(info[0]).reshape(1,-1)
+  else:
+    print("calculate new")
+    updated_taste = calculate_taste(user_id,db)
+    db_updated_taste = list(map(int, updated_taste[0]))
+    #insert new row to db
+    cursor.execute("INSERT INTO user_taste(user_id,taste) VALUES(%s, %s)",(user_id,db_updated_taste))
+    db.commit()
+    
+  return updated_taste
+
+
 def recommend_place(user_id,places_in_course,num_of_result):
   db= load_db()
   attraction = load_place(db)
-  user_taste = calculate_taste(user_id,db)
+  user_taste = retrieve_taste(user_id,db)
   attraction['user_rating'] = attraction['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
   attraction = attraction.sort_values('user_rating',ascending = False)

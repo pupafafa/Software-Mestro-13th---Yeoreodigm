@@ -4,6 +4,7 @@ import psycopg2
 import numpy as np
 import os
 import random
+import datetime
 
 def load_db():
   endpoint = os.environ['END_POINT']
@@ -12,6 +13,14 @@ def load_db():
   password = os.environ['WONSEOK']
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
+
+#db에서 가져오는 함수
+def retrieve_taste_db(user_id,db):
+  cursor = db.cursor()
+  sql = f"SELECT taste,last_update from user_taste where user_id={user_id}"
+  cursor.execute(sql)
+  result = cursor.fetchone()
+  return result
 
 def load_course(day,db,location):
   if day>=12:
@@ -59,7 +68,6 @@ def load_course(day,db,location):
 
   return df
   
-
 def calculate_taste(user_id,db):
   print("calculate_tast...")
   cursor = db.cursor()
@@ -67,7 +75,13 @@ def calculate_taste(user_id,db):
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
   cursor.execute(load_survey_sql)
   result = cursor.fetchone()
-  survey_result = result[0]
+  
+
+  try:
+    survey_result = result[0]
+  except Exception as e:
+    print("해당 유저가 존재하지 않습니다.")
+
   print(survey_result)
 
   theme_score = np.array([0]*22)
@@ -105,6 +119,30 @@ def calculate_taste(user_id,db):
   print("user's taste : ",theme_score.reshape(1,-1))
   return theme_score.reshape(1,-1)
 
+def retrieve_taste(user_id,db):
+  info = retrieve_taste_db(user_id,db)
+  cursor =db.cursor()
+  if info != None: 
+    if (datetime.date.today() - info[1].date()).days>=3:
+      print("update calcuate")
+      updated_taste = calculate_taste(user_id,db)
+      db_updated_taste = list(map(int, updated_taste[0]))
+      #update db
+      sql = f"update user_taste set taste = ARRAY{db_updated_taste} where user_id = {user_id}"
+      cursor.execute(sql)
+      db.commit()
+    else:
+      print("db에서 그대로 가져와서 빨라용!!")
+      return np.array(info[0]).reshape(1,-1)
+  else:
+    print("calculate new")
+    updated_taste = calculate_taste(user_id,db)
+    db_updated_taste = list(map(int, updated_taste[0]))
+    #insert new row to db
+    cursor.execute("INSERT INTO user_taste(user_id,taste) VALUES(%s, %s)",(user_id,db_updated_taste))
+    db.commit()
+    
+  return updated_taste
 
 
 def path_divider(day,path):
@@ -133,8 +171,7 @@ def path_divider(day,path):
   return path_per_day
 
 
-
-def recommend_by_theme(user_id, day, include_list,location,db):
+def recommend_course(user_id, day, include_list,location,db):
   top = 10
   course = load_course(day,db,location)
   course_size = len(course)
@@ -143,7 +180,7 @@ def recommend_by_theme(user_id, day, include_list,location,db):
     print("empty course")
     return None
 
-  user_taste = calculate_taste(user_id,db)
+  user_taste = retrieve_taste(user_id,db)
   course['user_rating'] = course['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
   print("course : \n",course)
@@ -155,13 +192,13 @@ def recommend_by_theme(user_id, day, include_list,location,db):
     result_places = list(map(int,result_places))
     return (path_divider(day,result_places))
   elif len(course) < 5:
-    high_score_items_id = course[['id','score']]
+    high_score_items_id = course[['id','score','user_rating']]
   elif len(course) < 10:
-    high_score_items_id = course.iloc[:course_size//2][['id','score']]
+    high_score_items_id = course.iloc[:course_size//2][['id','score','user_rating']]
   elif len(course) < 20:
-    high_score_items_id = course.iloc[:course_size//5][['id','score']]
+    high_score_items_id = course.iloc[:course_size//5][['id','score','user_rating']]
   else:
-    high_score_items_id = course.iloc[:course_size//10][['id','score']]
+    high_score_items_id = course.iloc[:course_size//10][['id','score','user_rating']]
   
   
 
@@ -170,10 +207,10 @@ def recommend_by_theme(user_id, day, include_list,location,db):
   ##여기서 평균 인기도 기준 상위 50퍼센트만 또 뽑아내기.
   high_score_items_id = high_score_items_id.sort_values(by='score',ascending= False)
   high_score_items_id = list(high_score_items_id.iloc[:len(high_score_items_id)//2]['id'].values)
-  print("high_score_items_id 인기도 탑 50%: ",high_score_items_id)
+  print("high_score_items_id 인기도 탑 30%: ",high_score_items_id)
   
-  #여기서 1등을 한 놈 반환해주자
-  result_id = high_score_items_id[0]
+  #여기서 랜덤으로 한 놈 반환해주자
+  result_id = random.choice(high_score_items_id)
   result_places = course.loc[course['id']==result_id,['places']].values[0][0]
   print("result_places : ",result_places)
   
@@ -206,7 +243,7 @@ def lambda_handler(event, context):
             "success": False,
             "message": "Database Error",
         }
-  result_path = recommend_by_theme(id, day,include,location,db)
+  result_path = recommend_course(id, day,include,location,db)
   if result_path == None:
     return {
       'statusCode': 200,
