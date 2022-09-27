@@ -5,6 +5,7 @@ import os
 import math
 import numpy as np
 
+JEJU_AIRPORT = (0,33.5059364, 126.4959513)
 
 def load_db():
   endpoint = os.environ['END_POINT']
@@ -42,37 +43,51 @@ def make_dist_matrix(location_list):
       dist_matrix[j][i] = dist_matrix[i][j]
   return dist_matrix
 
-def find_optimal(dist_matrix,day):
+def find_cluster_near_airport(cluster_info,airport):
+  min = 9999
+  cluster_num = -1 #공항에서 가장 가까운 클러스터 번호
+  for val in cluster_info:
+    new_dist = calculate_distance(val,airport)
+    
+    if min > new_dist:
+      print("min : ",new_dist)
+      print("cluster_info: ",val)
+      min = new_dist
+      cluster_num = val[0]
+  return cluster_num
+  
+def find_optimal(dist_matrix,day,first_day):
   print("dist matrix : ",dist_matrix)
   total_dist = [0]*day
-  visit_result = [[] for _ in range(day)]
-  for i in range(day):
-    start = i
-    visit = [False] * day
-    visit[i] = True    
-    now = i
-    min_dist = 100
-    min_idx = 999
-    visit_result[i].append(now)
-    while False in visit: #모든 클러스터를 방문할때까지
-      for idx, dist in enumerate(dist_matrix[now]):
-        if visit[idx] == True:
-          continue
-        else:
-          if dist < min_dist:
-            min_idx = idx
-            min_dist = dist
-      print("min idx, min_dist : ",min_idx,min_dist)
-      
-      total_dist[i] += min_dist
-      now = min_idx
-      visit[now] = True
-      visit_result[i].append(now)
-      min_dist=999
-    print("total_dist : ",total_dist[i])
+  visit_result = []
+  
+  #1일차가 될 클러스터는 공항에서 가장 가까운곳으로 선정. 다음 2일차, 3일차는 now에서 가장 가까운곳으로 선정
+  
+  start = first_day
+  visit = [False] * day
+  visit[start] = True    
+  now = start
+  visit_result.append(now)
+  min_dist = 9999
+  min_idx = -1
+  #visit_result[i].append(now)
+  while False in visit: #모든 클러스터를 방문할때까지
+    #인접한 모든 클러스터를 방문후에 가장 가까운 클러스터 택 1
+    for idx, dist in enumerate(dist_matrix[now]):
+      if visit[idx] == True:
+        continue
+      else:
+        if dist < min_dist:
+          min_idx = idx
+          min_dist = dist
+    print("min idx, min_dist : ",min_idx,min_dist)
 
-  shortest_cluster = np.array(total_dist).argsort()[0]
-  return visit_result[shortest_cluster]
+    now = min_idx
+    visit[now] = True
+    visit_result.append(now)
+    min_dist=999
+   
+  return visit_result
   
 def optimize_course(place_info,day):
 
@@ -91,12 +106,19 @@ def optimize_course(place_info,day):
   for i in range(day):
     cluster_center[i][0] = i
   print(cluster_center)
+  
+  #각 클러스터별 중심좌표를 이용해 n*n matrix 만들기
   dist_matrix = make_dist_matrix(cluster_center)
-  optimal_cluster_order = find_optimal(dist_matrix,day)
+  #첫 날은 공항에서 가장 가까운 곳으로
+  first_day =  int(find_cluster_near_airport(cluster_center,JEJU_AIRPORT))
+  print("first day : ",first_day)
+  #클러스터간 방문 순서는 거리 기준으로 최적화하기
+  optimal_cluster_order = find_optimal(dist_matrix,day,first_day)
 
   for idx, label in enumerate(kmeans.labels_):
     now = save_id[idx]
     result[label].append(int(now))
+  print("\nresult : ",result)
   #이제 원래의 Idx와 중심좌표를 기준으로 
   new_result = []
   for i in optimal_cluster_order:
