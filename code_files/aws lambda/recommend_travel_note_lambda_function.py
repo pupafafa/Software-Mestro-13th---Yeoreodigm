@@ -4,6 +4,7 @@ import psycopg2
 import numpy as np
 import os
 from sklearn.metrics.pairwise import cosine_similarity
+import datetime
 
 def load_db():
   endpoint = os.environ['END_POINT']
