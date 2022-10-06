@@ -39,9 +39,6 @@ class PostAPIView(APIView):
             print('이미지 타입은?? ', type(img),img)
             
             image = UserImage.objects.create(post=post,image=img)
-            
-            
-            
             now_img = Image.open(img).resize((260,340))
             now_img.show()
             
@@ -56,13 +53,6 @@ class PostAPIView(APIView):
         photodigm.save()
         # photo_frame.seek(0)
         photo_frame.show()
-        print('request : ',request)
-        print("*"*20)
-        print('request.data : ',request.data)
-        print("*"*20)
-        print('request.file : ',request.FILES)
-        print("*"*20)
-
          
         if serializer.is_valid():
             serializer.save()
