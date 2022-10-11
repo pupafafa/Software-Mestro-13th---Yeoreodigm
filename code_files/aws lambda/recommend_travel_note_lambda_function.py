@@ -79,10 +79,12 @@ def retrieve_taste(user_id,db):
     if (datetime.date.today() - info[1].date()).days>=3:
       print("update calcuate")
       updated_taste = calculate_taste(user_id,db)
+      print("updated_taste: ",updated_taste)
       db_updated_taste = list(map(int, updated_taste[0]))
+      print("db_updated_taste : ",db_updated_taste)
+      #sql = "update user_taste set taste = %s where user_id = %s,"(db_updated_taste,user_id)
       #update db
-      sql = f"update user_taste set taste = ARRAY{db_updated_taste} where user_id = {user_id}"
-      cursor.execute(sql)
+      cursor.execute("update user_taste set taste = %s, last_update = %s where user_id = %s",(db_updated_taste,datetime.datetime.now() , user_id))
       db.commit()
     else:
       print("db에서 그대로 가져와서 빨라용!!")
