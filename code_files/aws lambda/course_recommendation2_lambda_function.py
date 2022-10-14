@@ -1,11 +1,14 @@
 import json
-import pandas as pd
 import psycopg2
-import numpy as np
 import os
-from sklearn.metrics.pairwise import cosine_similarity
+import random
+import pandas as pd
+import numpy as np
 import datetime
 
+def to_lower_case(string):
+    return string.lower()
+    
 def load_db():
   endpoint = os.environ['END_POINT']
   dbname = os.environ['DB_NAME']
@@ -14,15 +17,17 @@ def load_db():
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
 
+#db에서 가져오는 함수
 def retrieve_taste_db(user_id,db):
   cursor = db.cursor()
   sql = f"SELECT taste,last_update from user_taste where user_id={user_id}"
   cursor.execute(sql)
   result = cursor.fetchone()
   return result
-  
+
+#여행성향 새로 계산하는 함수
 def calculate_taste(user_id,db):
-  print("calculate_tast...")
+  print("calculate_taste...")
   cursor = db.cursor()
   #1. retrieve from survey
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
@@ -30,9 +35,11 @@ def calculate_taste(user_id,db):
   result = cursor.fetchone()
   
 
-  
-  survey_result = result[0]
-  
+  try:
+    survey_result = result[0]
+  except Exception as e:
+    print("해당 유저가 존재하지 않습니다.")
+
   print(survey_result)
 
   theme_score = np.array([0]*22)
@@ -66,8 +73,8 @@ def calculate_taste(user_id,db):
       cursor.execute(load_place_sql)
       place_theme = cursor.fetchone()
       theme_score += np.array(place_theme)
-  print("calculate_tast DONE!!")
-  print("user's taste : ",theme_score.reshape(1,-1))
+  print("calculate_taste DONE!!")
+  print("user's updated taste : ",theme_score.reshape(1,-1))
   return theme_score.reshape(1,-1)
 
 #한명의 여행성향을 가져오는 함수 (필요시 계산)
@@ -96,15 +103,29 @@ def retrieve_taste(user_id,db):
     
   return updated_taste
 
-def load_course(day,db,location):
-  if day>=25:
-    day = 25
+#여러명의 여행성향을 계산해서 평균내주는 함수 (1명 가능)
+def retrieve_group_taste(user_list,db):
+  print("그룹원 전체의 성향을 계산중입니다...")
+  entire_taste = np.zeros(shape=(1,22))
+  for user in user_list:
+    now_taste = retrieve_taste(user_id=user,db=db)
+    print('now taste : ',now_taste[0])
+    entire_taste = entire_taste + now_taste
+  print("entire_taste before dividing: ", entire_taste)  
+  entire_taste = entire_taste / len(user_list)
+  return entire_taste
+  
+
+def load_course(day,db,location,children,pet):
+  if day>=12:
+    day = 11
     location = []
   cursor= db.cursor()
   min_length = 2*day
   max_length = 4*day
-  count = 0
+  print("location : ",location)
   location_count = len(location)
+  location_sql = ''
   if location_count == 4 or location_count == 0:
     location_sql = ' and 1=1'
   #case 2 : 한 지역만 선택한 경우 
@@ -125,9 +146,9 @@ def load_course(day,db,location):
   #places가 80번(러브랜드 휴업중)을 포함하는 코스는 제외
   exclude_love_land_sql = " and 80 != ALL(places)"
 
-  load_course_sql= (f"SELECT id, theme, score, places FROM course_ WHERE length>={min_length} and length<={max_length}" + location_sql + exclude_love_land_sql)
+  load_course_sql= (f"SELECT id, theme, score, places, children0,children2, pet1 FROM course_ WHERE length>={min_length} and length<={max_length}" + location_sql + exclude_love_land_sql)
   #해당 query문으로 query 날려서 결과가 있는지 확인해야함.
-  
+  print("load_course_sql : " ,load_course_sql)
   cursor.execute(load_course_sql)
   result = cursor.fetchall()
 
@@ -137,48 +158,122 @@ def load_course(day,db,location):
   if df.empty:
     print("no course")
     return df
-
-  df.columns = ['id','theme','score','places']
-
+#(course['children0']<0.125) & (course['children2']>0) ].
+  df.columns = ['id','theme','score','places','children0','children2','pet1']
+  if children == 1:
+    df = df.loc[ (df['children0']<=0.125) & (df['children2']>0) ]
+  if pet == 1:
+    df = df.loc[ df['pet1'] >= 0.5]
   return df
-  #intersect 밖의 place를 모든 df의 Places list에 append 해줘야함.
 
-  
-def recommend_travel_note(user_id, num_of_result,db):
-  day=3
-  location = ['east','west','south','north'] #전지역으로 하자 (위치 상관없이)
-  course = load_course(day,db,location)
+def weighing_taste(tags,user_taste):
+  print(tags)
+  if tags[0] != 'empty':
+    index_indicator = {'nature':[[2,1.5],[3,2.0]],'indoor':[[4,2.0],[5,1.5]],'outdoor':[[6,1.5],[7,2.0]],
+                      'healing':[[8,2.0],[9,1.5]],'walking':[[8,2.0],[12,1.5]],'mountain':[[11,2.0]],
+                      'sea':[[13,2.0]],'activity':[[16,1.5],[17,2.0]],'culture':[[21,2.0]]}
+    #tags = ['nature','sea']
+    #user_taste = array([[214, 411, 188, 191, 108,  17,  60, 357, 369, 106,  67,  79, 330, 133, 213, 192,  73,  64, 411,  67,   8,  56]])
+
+    for tag in tags:
+      print(index_indicator[tag])
+      for idx,weight in index_indicator[tag]:
+        user_taste[0][idx] *= weight
+
+def recommend_course(user_id, day, include_list,location,db,children,pet,tag_info):
+  top = 10
+  course = load_course(day,db,location,children,pet)
   course_size = len(course)
 
   if course.empty:
     print("empty course")
     return None
 
-  user_taste = retrieve_taste(user_id,db)
+  user_taste = retrieve_group_taste(user_id,db)
+  print('user_taste before weighing : ',user_taste)
+  weighing_taste(tags=tag_info,user_taste=user_taste)
+  print('user_taste after weighing : ', user_taste)
   course['user_rating'] = course['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
+  print("course : \n",course)
   course = course.sort_values('user_rating',ascending = False)
-  high_score_items_id = course.iloc[:course_size//10][['id','score']]
+  result_places = []
+  if len(course) == 1:
+    result_places = course['places'].values[0]
+    print("result_places", result_places)
+    result_places = list(map(int,result_places))
+    return (path_divider(day,result_places))
+  elif len(course) < 5:
+    high_score_items_id = course[['id','score','user_rating']]
+  elif len(course) < 10:
+    high_score_items_id = course.iloc[:course_size//2][['id','score','user_rating']]
+  elif len(course) < 20:
+    high_score_items_id = course.iloc[:course_size//5][['id','score','user_rating']]
+  else:
+    high_score_items_id = course.iloc[:course_size//10][['id','score','user_rating']]
+  
+  
+
   print("high_score_items_id 취향 점수 기반 탑텐: ",high_score_items_id)
   
   ##여기서 평균 인기도 기준 상위 50퍼센트만 또 뽑아내기.
   high_score_items_id = high_score_items_id.sort_values(by='score',ascending= False)
   high_score_items_id = list(high_score_items_id.iloc[:len(high_score_items_id)//2]['id'].values)
-  print("high_score_items_id 인기도 탑 50%: ",high_score_items_id)
+  print("high_score_items_id 인기도 탑 30%: ",high_score_items_id)
   
-  #여기서 랭킹 높은 차례대로 반환해주자
+  #여기서 랜덤으로 한 놈 반환해주자
+  result_id = random.choice(high_score_items_id)
+  result_places = course.loc[course['id']==result_id,['places']].values[0][0]
+  print("result_places : ",result_places)
   
-  result = high_score_items_id[:num_of_result]
-  result = list(map(int,result)) #to use json format,  convert int64 to int
+  #이미 course에 있는 여행지가 뽑힌 경우 다시 뽑기
+  print("include_list : ",include_list)
+  if 0 not in include_list:
+    not_included = list(set(include_list) - set(result_places))
+    result_places += not_included
+  
+  
+  result_places = list(map(int,result_places)) #to use json format,  convert int64 to int
 
+  result = path_divider(day,result_places)
   return result
+
+def path_divider(day,path):
+  path_per_day = []
+  checker = day
+
+  length = len(path)
+  print('length :',length )
+
+  remainder = length%day
+  quotient = length//day
+
+  start = 0
+  check=0
+
+  while start<length:
+    print(path[start:start + quotient + check])
+    now_day_path = path[start:start + quotient + check]
+    now_day_path = list(map(int,now_day_path))
+    path_per_day.append(now_day_path)
+    start += quotient+check
+    checker-=1
+    if checker<=remainder:
+      check = 1
+
+  return path_per_day
   
 
 def lambda_handler(event, context):
 
-  id = int(event['queryStringParameters']['memberId'])
-  num_of_result = int(event['queryStringParameters']['numOfResult'])
-
+  id = list(map(int,event['queryStringParameters']['id'].split(',')))
+  day = int(event['queryStringParameters']['day'])
+  children = int(event['queryStringParameters']['children'])
+  pet = int(event['queryStringParameters']['pet'])
+  tags = event['queryStringParameters']['tags'].split(',')
+  include = list(map(int,event['queryStringParameters']['include'].split(',')))
+  location = event['queryStringParameters']['location'].split(',')
+  location = list(map(to_lower_case, location) )
   try:
     db = load_db()
   except:
@@ -186,8 +281,8 @@ def lambda_handler(event, context):
             "success": False,
             "message": "Database Error",
         }
-  result = recommend_travel_note(id,num_of_result,db)
-  if result == []:
+  result_path = recommend_course(id,day,include,location,db,children,pet,tags)
+  if result_path == None:
     return {
       'statusCode': 200,
       'body': json.dumps({  
@@ -200,7 +295,7 @@ def lambda_handler(event, context):
   return {
       'statusCode': 200,
       'body': json.dumps({  
-                            "noteList" : result,
+                            "courseList" : result_path,
                             })
   }
   

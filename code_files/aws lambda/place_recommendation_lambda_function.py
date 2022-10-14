@@ -16,6 +16,7 @@ def load_db():
   db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
   return db
 
+
 #db에서 가져오는 함수
 def retrieve_taste_db(user_id,db):
   cursor = db.cursor()
@@ -23,9 +24,10 @@ def retrieve_taste_db(user_id,db):
   cursor.execute(sql)
   result = cursor.fetchone()
   return result
-  
+
+#여행성향 새로 계산하는 함수
 def calculate_taste(user_id,db):
-  print("calculate_tast...")
+  print("calculate_taste...")
   cursor = db.cursor()
   #1. retrieve from survey
   load_survey_sql = f'SELECT result FROM survey_result WHERE member_id = {user_id};'
@@ -47,7 +49,7 @@ def calculate_taste(user_id,db):
     cursor.execute(load_place_sql)
     place_theme = cursor.fetchone()
     
-    theme_score += np.array(place_theme)*10
+    theme_score += np.array(place_theme)*2
   #2. retrieve from place-like log
   load_like_log_sql = f'SELECT place_id FROM place_like WHERE member_id = {user_id};'
   cursor.execute(load_like_log_sql)
@@ -58,7 +60,7 @@ def calculate_taste(user_id,db):
       load_place_sql = f'SELECT theme FROM places_analysis WHERE place_id={place}'
       cursor.execute(load_place_sql)
       place_theme = cursor.fetchone()
-      theme_score += np.array(place_theme)*7
+      theme_score += np.array(place_theme)*5
   
   #3. retrieve from place_click log
   load_click_log_sql = f'SELECT place_id FROM places_log WHERE member_id = {user_id};'
@@ -71,27 +73,17 @@ def calculate_taste(user_id,db):
       cursor.execute(load_place_sql)
       place_theme = cursor.fetchone()
       theme_score += np.array(place_theme)
-  print("calculate_tast DONE!!")
-  print("user's taste : ",theme_score.reshape(1,-1))
+  print("calculate_taste DONE!!")
+  print("user's updated taste : ",theme_score.reshape(1,-1))
   return theme_score.reshape(1,-1)
 
-def load_place(db):
-  cursor = db.cursor()
-  sql = "SELECT place_id,theme from places_analysis"
-  cursor.execute(sql)
-  result = cursor.fetchall()
-  attraction = pd.DataFrame(result)
-  attraction.columns = ['id','theme']
-  return attraction
-
+#한명의 여행성향을 가져오는 함수 (필요시 계산)
 def retrieve_taste(user_id,db):
   info = retrieve_taste_db(user_id,db)
   cursor =db.cursor()
   if info != None: 
     if (datetime.date.today() - info[1].date()).days>=3:
-      print("update calcuate")
       updated_taste = calculate_taste(user_id,db)
-      print("updated_taste: ",updated_taste)
       db_updated_taste = list(map(int, updated_taste[0]))
       print("db_updated_taste : ",db_updated_taste)
       #sql = "update user_taste set taste = %s where user_id = %s,"(db_updated_taste,user_id)
@@ -111,11 +103,34 @@ def retrieve_taste(user_id,db):
     
   return updated_taste
 
+#여러명의 여행성향을 계산해서 평균내주는 함수 (1명 가능)
+def retrieve_group_taste(user_list,db):
+  print("그룹원 전체의 성향을 계산중입니다...")
+  entire_taste = np.zeros(shape=(1,22))
+  for user in user_list:
+    now_taste = retrieve_taste(user_id=user,db=db)
+    print('now taste : ',now_taste[0])
+    entire_taste = entire_taste + now_taste
+  print("entire_taste before dividing: ", entire_taste)  
+  entire_taste = entire_taste / len(user_list)
+  return entire_taste
+  
+def load_place(db):
+  cursor = db.cursor()
+  sql = "SELECT place_id,theme from places_analysis"
+  cursor.execute(sql)
+  result = cursor.fetchall()
+  attraction = pd.DataFrame(result)
+  attraction.columns = ['id','theme']
+  return attraction
+
+
+
 
 def recommend_place(user_id,places_in_course,num_of_result):
   db= load_db()
   attraction = load_place(db)
-  user_taste = retrieve_taste(user_id,db)
+  user_taste = retrieve_group_taste(user_id,db)
   attraction['user_rating'] = attraction['theme'].apply(lambda x: np.sum(x*user_taste))
   #취향 점수가 높은 상위 10퍼센트만 선택하기
   attraction = attraction.sort_values('user_rating',ascending = False)
@@ -142,8 +157,8 @@ def recommend_place(user_id,places_in_course,num_of_result):
 
 def lambda_handler(event, context):
   # TODO implement
-  id = int(event['queryStringParameters']['memberId'])
-  places_in_course = event['queryStringParameters']['placesInCourse'].split(',')
+  id = list(map(int,(event['queryStringParameters']['memberId']).split(',')))
+  places_in_course = list(map(int,event['queryStringParameters']['placesInCourse'].split(',')))
   num_of_result = int(event['queryStringParameters']['numOfResult'])
 
   try:

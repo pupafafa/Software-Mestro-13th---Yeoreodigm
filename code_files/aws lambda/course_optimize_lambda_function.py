@@ -1,10 +1,10 @@
 import json
 import psycopg2
-from sklearn.cluster import KMeans
 import os 
 import math
 import numpy as np
-
+from haversine import haversine
+from itertools import combinations
 JEJU_AIRPORT = (0,33.5059364, 126.4959513)
 
 def load_db():
@@ -19,111 +19,133 @@ def load_db():
 def load_places_location(db, place_list):
   cursor = db.cursor()
   place_list = str(tuple(place_list))
+  print("place list : ",place_list)
   sql = f"select place_id, latitude, longitude from places where place_id in {place_list}"
   cursor.execute(sql)
   result = cursor.fetchall()
   result = list(map(list,result))
   return result
   
-def calculate_distance(A,B):
+def calculate_distance_haversine(A,B):
   A_x = A[1]
   A_y = A[2]
   B_x = B[1]
   B_y = B[2]
-  dist = math.sqrt((A_x - B_x)**2 + (A_y - B_y)**2)
+  dist = haversine((A_x,A_y),(B_x,B_y))
   return dist
   
-def make_dist_matrix(location_list):
-  matrix_size = len(location_list)
+def make_dist_matrix_haversine(location_info):
+  print("making matrix!!!")
+  matrix_size = len(location_info)
   #initialize empty n*n matrix
   dist_matrix = [([0] * matrix_size) for _ in range(matrix_size)]
   for i in range(matrix_size):
     for j in range(i+1,matrix_size):
-      dist_matrix[i][j] = calculate_distance(location_list[i],location_list[j])
+      dist_matrix[i][j] = calculate_distance_haversine(location_info[i],location_info[j])
       dist_matrix[j][i] = dist_matrix[i][j]
   return dist_matrix
+  
 
-def find_cluster_near_airport(cluster_info,airport):
-  min = 9999
-  cluster_num = -1 #공항에서 가장 가까운 클러스터 번호
-  for val in cluster_info:
-    new_dist = calculate_distance(val,airport)
-    
-    if min > new_dist:
-      print("min : ",new_dist)
-      print("cluster_info: ",val)
-      min = new_dist
-      cluster_num = val[0]
-  return cluster_num
   
-def find_optimal(dist_matrix,day,first_day):
-  print("dist matrix : ",dist_matrix)
-  total_dist = [0]*day
-  visit_result = []
-  
-  #1일차가 될 클러스터는 공항에서 가장 가까운곳으로 선정. 다음 2일차, 3일차는 now에서 가장 가까운곳으로 선정
-  
-  start = first_day
-  visit = [False] * day
-  visit[start] = True    
-  now = start
-  visit_result.append(now)
-  min_dist = 9999
-  min_idx = -1
-  #visit_result[i].append(now)
-  while False in visit: #모든 클러스터를 방문할때까지
-    #인접한 모든 클러스터를 방문후에 가장 가까운 클러스터 택 1
-    for idx, dist in enumerate(dist_matrix[now]):
-      if visit[idx] == True:
-        continue
-      else:
-        if dist < min_dist:
-          min_idx = idx
-          min_dist = dist
-    print("min idx, min_dist : ",min_idx,min_dist)
 
-    now = min_idx
-    visit[now] = True
-    visit_result.append(now)
-    min_dist=999
-   
-  return visit_result
   
-def optimize_course(place_info,day):
 
+def optimize_course(place_list,day,db):
+  place_info = load_places_location(db, place_list)
   save_id = []  
   result = [[] for _ in range(day)]
-  for i in place_info:
-    save_id.append(i[0])
-  #id는 클러스터링에 무관하게 만들기
-  for i in place_info:
-    i[0] = 0
-    
-  kmeans = KMeans(n_clusters=day,random_state=0)
-  kmeans = kmeans.fit(place_info)
   
-  cluster_center = kmeans.cluster_centers_
-  for i in range(day):
-    cluster_center[i][0] = i
-  print(cluster_center)
-  
-  #각 클러스터별 중심좌표를 이용해 n*n matrix 만들기
-  dist_matrix = make_dist_matrix(cluster_center)
-  #첫 날은 공항에서 가장 가까운 곳으로
-  first_day =  int(find_cluster_near_airport(cluster_center,JEJU_AIRPORT))
-  print("first day : ",first_day)
-  #클러스터간 방문 순서는 거리 기준으로 최적화하기
-  optimal_cluster_order = find_optimal(dist_matrix,day,first_day)
+  AIRPORT = (33.5059364,126.4959513)
+  length = len(place_info)
+  total_dist = [0]*length
+  visit_result = [[] for _ in range(length)]
 
-  for idx, label in enumerate(kmeans.labels_):
-    now = save_id[idx]
-    result[label].append(int(now))
-  print("\nresult : ",result)
-  #이제 원래의 Idx와 중심좌표를 기준으로 
-  new_result = []
-  for i in optimal_cluster_order:
-    new_result.append(result[i])
-  return new_result
+  dist_matrix = make_dist_matrix_haversine(place_info)
+
+  for i in range(length):
+    start = i
+    end = 999
+    visit = [False] * length
+    visit[i] = True    
+    now = i
+    min_dist = 100
+    min_idx = 999
+    visit_result[i].append(now)
+    print("start : ",start)
+    while False in visit: #모든 클러스터를 방문할때까지
+      for idx, dist in enumerate(dist_matrix[now]):
+        if visit[idx] == True:
+          continue
+        else:
+          if dist < min_dist:
+            min_idx = idx
+            min_dist = dist
+      print("dist from %d to %d : %.2f  "%(now,min_idx,min_dist))
+      
+      total_dist[start] += min_dist
+      now = min_idx
+      visit[now] = True
+      visit_result[start].append(now)
+      min_dist=999
+      end = min_idx
+
+    airport_to_start = haversine(AIRPORT,place_info[start][1:]) # 공항에서 시작지점 까지 거리
+    end_to_airport = haversine(AIRPORT,place_info[end][1:]) #마지막지점에서 공항 가는 거리
+    total_dist[i] += airport_to_start 
+    total_dist[i] += end_to_airport  
+
+    print("airport - 시작지점(%s) 까지 거리%s 합산"%(start,airport_to_start))
+    print("끝지점(%s) - 공항  까지 거리%s 합산"%(end,end_to_airport))
+    print("total_dist : ",total_dist[i])
+
+  shortest_cluster = np.array(total_dist).argsort()[0]
+  result_index = visit_result[shortest_cluster]  #최단거리를 보장하는 index 방문 순서 마지막에 이 인덱스랑 Id랑 매핑해줘야함.
+ 
+
+  #day dividing ...
+  day_dividing = []
+  print("result_index[-1]: ",result_index[-1])
+  for comb in combinations(result_index,day-1):
+    #comb : (5,3,7)
+    #print("comb : ",comb)
+    if comb[-1] == result_index[-1]: 
+      continue
+    dist = 0
+    for now in comb:
+      next = result_index[result_index.index(now) + 1]
+      now_loc = place_info[now][1:]
+      next_loc = place_info[next][1:]
+      
+      dist += haversine(now_loc,next_loc)
+    day_dividing.append((dist,comb))
+    
+  day_dividing.sort()
+  divider = day_dividing[-1][1]
+  print("divider : ",divider)
+  final_result = []
+  today_places = []
+  start = 0
+  for i in divider:
+    cut = result_index.index(i)  
+    final_result.append(result_index[start:cut+1])
+    start = cut+1
+  final_result.append(result_index[start:])
+  #a = [list(map(float, suba)) for suba in a]
+  #final_result = [( ) for places in final_result]
+  final_result2 = []
+  
+  for i in final_result:
+    tmp_list = []
+    print("i : ",i)
+    for j in i:
+      print("j : ",j)
+      tmp_list.append(place_info[j][0])
+    final_result2.append(tmp_list)
+
+
+  return final_result2
+
+
   
 def lambda_handler(event, context):
 
@@ -138,8 +160,8 @@ def lambda_handler(event, context):
             "success": False,
             "message": "Database Error",
         }
-  place_info = load_places_location(db, place_list)
-  result = optimize_course(place_info,day)
+
+  result = optimize_course(place_list,day,db)
   return {
       'statusCode': 200,
       'body': json.dumps({  
