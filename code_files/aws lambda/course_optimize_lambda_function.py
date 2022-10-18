@@ -45,18 +45,13 @@ def make_dist_matrix_haversine(location_info):
       dist_matrix[j][i] = dist_matrix[i][j]
   return dist_matrix
   
-
-  
-
-  
-
 def optimize_course(place_list,day,db):
   place_info = load_places_location(db, place_list)
   save_id = []  
   result = [[] for _ in range(day)]
   
   AIRPORT = (33.5059364,126.4959513)
-  length = len(place_info)
+  length = len(place_list)
   total_dist = [0]*length
   visit_result = [[] for _ in range(length)]
 
@@ -104,7 +99,8 @@ def optimize_course(place_list,day,db):
 
   #day dividing ...
   day_dividing = []
-  print("result_index[-1]: ",result_index[-1])
+  print("result_index : ",result_index)
+
   for comb in combinations(result_index,day-1):
     #comb : (5,3,7)
     #print("comb : ",comb)
@@ -119,31 +115,43 @@ def optimize_course(place_list,day,db):
       dist += haversine(now_loc,next_loc)
     day_dividing.append((dist,comb))
     
-  day_dividing.sort()
-  divider = day_dividing[-1][1]
-  print("divider : ",divider)
-  final_result = []
-  today_places = []
-  start = 0
-  for i in divider:
-    cut = result_index.index(i)  
-    final_result.append(result_index[start:cut+1])
-    start = cut+1
-  final_result.append(result_index[start:])
-  #a = [list(map(float, suba)) for suba in a]
-  #final_result = [( ) for places in final_result]
-  final_result2 = []
+  day_dividing.sort(reverse = True) #내림차순 정렬
   
-  for i in final_result:
-    tmp_list = []
-    print("i : ",i)
-    for j in i:
-      print("j : ",j)
-      tmp_list.append(place_info[j][0])
-    final_result2.append(tmp_list)
+  
+  for i in range(len(day_dividing)):
+    divider = day_dividing[i][1]
+    pass_token = 1
+    print("divider : ",divider)
+    
+    final_result = []
+    start = 0
+    for i in divider:
+      cut = result_index.index(i)  
+      final_result.append(result_index[start:cut+1])
+      if cut-start > 5: # 하루에 6곳 이상을 방문하는 경우
+        pass_token = 0
+        break
+      start = cut+1
+
+    if pass_token == 0:
+      continue
+    
+    final_result.append(result_index[start:])
+  
+
+  #index -> id 전환
+    final_result2 = []
+    for i in final_result:
+      tmp_list = []
+      print("i : ",i)
+      for j in i:
+        print("j : ",j)
+        tmp_list.append(place_info[j][0])
+      final_result2.append(tmp_list)
 
 
-  return final_result2
+    return final_result2
+
 
 
   
