@@ -51,7 +51,7 @@ def optimize_course(place_list,day,db):
   result = [[] for _ in range(day)]
   
   AIRPORT = (33.5059364,126.4959513)
-  length = len(place_list)
+  length = len(place_info)
   total_dist = [0]*length
   visit_result = [[] for _ in range(length)]
 
