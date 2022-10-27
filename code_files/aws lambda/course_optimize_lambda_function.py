@@ -7,6 +7,33 @@ from haversine import haversine
 from itertools import combinations
 JEJU_AIRPORT = (0,33.5059364, 126.4959513)
 
+
+def path_divider(day,path):
+  path_per_day = []
+  checker = day
+
+  length = len(path)
+  print('length :',length )
+
+  remainder = length%day
+  quotient = length//day
+
+  start = 0
+  check=0
+
+  while start<length:
+    print(path[start:start + quotient + check])
+    now_day_path = path[start:start + quotient + check]
+    now_day_path = list(map(int,now_day_path))
+    path_per_day.append(now_day_path)
+    start += quotient+check
+    checker-=1
+    if checker<=remainder:
+      check = 1
+
+  return path_per_day
+  
+  
 def load_db():
   endpoint = os.environ['END_POINT']
   dbname = os.environ['DB_NAME']
@@ -51,7 +78,7 @@ def optimize_course(place_list,day,db):
   result = [[] for _ in range(day)]
   
   AIRPORT = (33.5059364,126.4959513)
-  length = len(place_info)
+  length = len(place_list)
   total_dist = [0]*length
   visit_result = [[] for _ in range(length)]
 
@@ -100,6 +127,19 @@ def optimize_course(place_list,day,db):
   #day dividing ...
   day_dividing = []
   print("result_index : ",result_index)
+  print('조합 개수',len(list(combinations(result_index,day-1))))
+  if len(list(combinations(result_index,day-1))) > 1e5:
+    print("조합이 너무 많으니까 path divider로 단순하게 나눌거에요~ ㅎㅎ")
+    final_result = path_divider(day,result_index)
+    final_result2 = []
+    for i in final_result:
+      tmp_list = []
+      print("i : ",i)
+      for j in i:
+        print("j : ",j)
+        tmp_list.append(place_info[j][0])
+      final_result2.append(tmp_list)
+    return final_result2
 
   for comb in combinations(result_index,day-1):
     #comb : (5,3,7)
@@ -151,6 +191,8 @@ def optimize_course(place_list,day,db):
 
 
     return final_result2
+
+
 
 
 
