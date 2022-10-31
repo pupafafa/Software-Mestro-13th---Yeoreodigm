@@ -128,7 +128,7 @@ def optimize_course(place_list,day,db):
   day_dividing = []
   print("result_index : ",result_index)
   print('조합 개수',len(list(combinations(result_index,day-1))))
-  if len(list(combinations(result_index,day-1))) > 1e5:
+  if len(list(combinations(result_index,day-1))) > 1e5 or len(place_info)<day:
     print("조합이 너무 많으니까 path divider로 단순하게 나눌거에요~ ㅎㅎ")
     final_result = path_divider(day,result_index)
     final_result2 = []
