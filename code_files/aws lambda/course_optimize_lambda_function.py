@@ -8,6 +8,15 @@ from itertools import combinations
 JEJU_AIRPORT = (0,33.5059364, 126.4959513)
 
 
+def load_db():
+  endpoint = os.environ['END_POINT']
+  dbname = os.environ['DB_NAME']
+  user = os.environ['USER_NAME']
+  password = os.environ['WONSEOK']
+  db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
+  return db
+  
+#계산량이 너무 많을때 단순한 방법으로 경로를 나눠주는 함수
 def path_divider(day,path):
   path_per_day = []
   checker = day
@@ -32,17 +41,8 @@ def path_divider(day,path):
       check = 1
 
   return path_per_day
-  
-  
-def load_db():
-  endpoint = os.environ['END_POINT']
-  dbname = os.environ['DB_NAME']
-  user = os.environ['USER_NAME']
-  password = os.environ['WONSEOK']
-  print(endpoint,dbname,user,password)
-  db = psycopg2.connect(host=endpoint,dbname=dbname,user=user,password=password)
-  return db
 
+#여행지id를 바탕으로 위치정보를 불러오는 함수
 def load_places_location(db, place_list):
   cursor = db.cursor()
   place_list = str(tuple(place_list))
@@ -52,7 +52,8 @@ def load_places_location(db, place_list):
   result = cursor.fetchall()
   result = list(map(list,result))
   return result
-  
+
+#두 좌표간 거리 계산  
 def calculate_distance_haversine(A,B):
   A_x = A[1]
   A_y = A[2]
@@ -60,7 +61,8 @@ def calculate_distance_haversine(A,B):
   B_y = B[2]
   dist = haversine((A_x,A_y),(B_x,B_y))
   return dist
-  
+
+#거리 matrix를 만드는 함수
 def make_dist_matrix_haversine(location_info):
   print("making matrix!!!")
   matrix_size = len(location_info)
@@ -72,6 +74,7 @@ def make_dist_matrix_haversine(location_info):
       dist_matrix[j][i] = dist_matrix[i][j]
   return dist_matrix
   
+#경로최적화 함수
 def optimize_course(place_list,day,db):
   place_info = load_places_location(db, place_list)
   save_id = []  
@@ -102,7 +105,7 @@ def optimize_course(place_list,day,db):
           if dist < min_dist:
             min_idx = idx
             min_dist = dist
-      print("dist from %d to %d : %.2f  "%(now,min_idx,min_dist))
+      #print("dist from %d to %d : %.2f  "%(now,min_idx,min_dist))
       
       total_dist[start] += min_dist
       now = min_idx
@@ -126,9 +129,12 @@ def optimize_course(place_list,day,db):
 
   #day dividing ...
   day_dividing = []
+  print('len(place_info)',len(place_info))
   print("result_index : ",result_index)
-  print('조합 개수',len(list(combinations(result_index,day-1))))
-  if len(list(combinations(result_index,day-1))) > 1e5 or len(place_info)<day:
+  
+  num_comb= math.comb(len(place_info),day-1)
+  print('조합 개수',num_comb)
+  if num_comb > 1e5 or len(place_info)<day:
     print("조합이 너무 많으니까 path divider로 단순하게 나눌거에요~ ㅎㅎ")
     final_result = path_divider(day,result_index)
     final_result2 = []
@@ -156,6 +162,7 @@ def optimize_course(place_list,day,db):
     day_dividing.append((dist,comb))
     
   day_dividing.sort(reverse = True) #내림차순 정렬
+  print('day_dividing : ',day_dividing)
   
   
   for i in range(len(day_dividing)):
@@ -190,13 +197,10 @@ def optimize_course(place_list,day,db):
       final_result2.append(tmp_list)
 
 
+
+
     return final_result2
 
-
-
-
-
-  
 def lambda_handler(event, context):
 
   day = int(event['queryStringParameters']['day'])
