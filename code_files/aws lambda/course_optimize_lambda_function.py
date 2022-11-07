@@ -105,7 +105,7 @@ def optimize_course(place_list,day,db):
           if dist < min_dist:
             min_idx = idx
             min_dist = dist
-      #print("dist from %d to %d : %.2f  "%(now,min_idx,min_dist))
+      print("dist from %d to %d : %.2f  "%(now,min_idx,min_dist))
       
       total_dist[start] += min_dist
       now = min_idx
@@ -132,7 +132,8 @@ def optimize_course(place_list,day,db):
   print('len(place_info)',len(place_info))
   print("result_index : ",result_index)
   
-  num_comb= math.comb(len(place_info),day-1)
+  num_comb = math.comb(len(place_info),day-1)
+
   print('조합 개수',num_comb)
   if num_comb > 1e5 or len(place_info)<day:
     print("조합이 너무 많으니까 path divider로 단순하게 나눌거에요~ ㅎㅎ")
@@ -162,9 +163,9 @@ def optimize_course(place_list,day,db):
     day_dividing.append((dist,comb))
     
   day_dividing.sort(reverse = True) #내림차순 정렬
-  print('day_dividing : ',day_dividing)
+  #print('day_dividing : ',day_dividing)
   
-  
+  final_result = []
   for i in range(len(day_dividing)):
     divider = day_dividing[i][1]
     pass_token = 1
@@ -173,38 +174,59 @@ def optimize_course(place_list,day,db):
     final_result = []
     start = 0
     for i in divider:
+      
       cut = result_index.index(i)  
+      print("start, cut : ",start,cut)
       final_result.append(result_index[start:cut+1])
+
       if cut-start > 5: # 하루에 6곳 이상을 방문하는 경우
+
+        print("너무 많이 방문해요!!")
         pass_token = 0
         break
+
       start = cut+1
 
-    if pass_token == 0:
-      continue
     
+    #마지막 값 확인 후 삽입
+    if len(place_info) - start >5:
+      pass_token = 0
+    
+    if pass_token == 0:
+      print("너무 많이 방문해요!!")
+      continue
+
     final_result.append(result_index[start:])
-  
+    print("final result : ",final_result)
+    break
+    #모든 경우의 수를 돌아도 combination을 적절히 쪼개지 못하는 경우
+  print("190 / final result : ",final_result)
+  if len(final_result) != day:
+    print("모든 경우를 확인했는데도 어쩔수 없이 특정 일자에 여행지를 너무 많이 방문해야하는군요")
+    # print(f'day : {day}, result_index : {result_index}')
+    final_result = path_divider(day,result_index)
 
   #index -> id 전환
-    final_result2 = []
-    for i in final_result:
-      tmp_list = []
-      print("i : ",i)
-      for j in i:
-        print("j : ",j)
-        tmp_list.append(place_info[j][0])
-      final_result2.append(tmp_list)
+  final_result2 = []
+  for i in final_result:
+    tmp_list = []
+    print("i : ",i)
+    for j in i:
+      print("j : ",j)
+      tmp_list.append(place_info[j][0])
+    final_result2.append(tmp_list)
 
 
 
 
-    return final_result2
+  return final_result2
+    
 
 def lambda_handler(event, context):
 
   day = int(event['queryStringParameters']['day'])
   place_list = list(map(int,event['queryStringParameters']['placeList'].split(',')))
+  print("입력으로 받은 place_list",place_list)
   
 
   try:
